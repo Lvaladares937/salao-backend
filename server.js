@@ -6,13 +6,14 @@ require('dotenv').config();
 const app = express();
 const port = 3000;
 
-// Middlewares - ATUALIZE ASSIM
-const cors = require('cors');
+// Middlewares - VERSÃO LIMPA (SEM DUPLICAÇÕES)
 app.use(cors({
     origin: ['http://localhost:3001', 'https://vailsonhair.com.br'],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
