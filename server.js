@@ -2915,9 +2915,6 @@ app.post('/api/configuracoes/horarios', (req, res) => {
     });
 });
 
-const botRoutes = require('./src/routes/botRoutes');
-app.use('/api/bot', botRoutes)
-
 // ============================================
 // INICIAR SERVIDOR (ÚNICO LISTEN)
 // ============================================
