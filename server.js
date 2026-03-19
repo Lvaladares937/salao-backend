@@ -7,6 +7,7 @@ const app = express();
 const port = 3000;
 
 // Middlewares - ATUALIZE ASSIM
+const cors = require('cors');
 app.use(cors({
     origin: ['http://localhost:3001', 'https://vailsonhair.com.br'],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
