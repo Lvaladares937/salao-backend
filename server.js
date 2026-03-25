@@ -6,10 +6,10 @@ require('dotenv').config();
 const app = express();
 const port = 3000;
 
-// 🔥 FORÇAR TIMEZONE DO BRASIL (adicione no topo)
+// 🔥 FORÇAR TIMEZONE DO BRASIL
 process.env.TZ = 'America/Sao_Paulo';
 
-// Middlewares - CORRIGIDO (removidas as duplicações)
+// Middlewares
 app.use(cors({
     origin: ['http://localhost:3001', 'https://vailsonhair.com.br'],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -18,13 +18,13 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 🔥 Conexão com MySQL - ADICIONADO timezone
+// 🔥 Conexão com MySQL
 const db = mysql.createConnection({
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'salao_beleza',
-    timezone: '-03:00'  // 👈 ADICIONADO - Força UTC-3 (Brasília)
+    timezone: '-03:00'
 });
 
 // Testar conexão
@@ -35,7 +35,7 @@ db.connect((err) => {
     }
     console.log('✅ Conectado ao MySQL!');
     
-    // 🔥 ADICIONADO - Forçar timezone da sessão
+    // Configurar timezone apenas uma vez
     db.query("SET SESSION time_zone = '-03:00'", (err) => {
         if (err) {
             console.error('❌ Erro ao setar timezone:', err);
@@ -45,12 +45,18 @@ db.connect((err) => {
     });
 });
 
-// 🔥 ADICIONADO - Middleware para garantir timezone em todas as consultas
+// 🔥 MIDDLEWARE CORRIGIDO - Só aplica timezone em consultas de escrita
 app.use((req, res, next) => {
-    db.query("SET SESSION time_zone = '-03:00'", (err) => {
-        if (err) console.error('❌ Erro ao garantir timezone:', err);
+    // Apenas para requisições POST, PUT, DELETE (escrita)
+    if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
+        db.query("SET SESSION time_zone = '-03:00'", (err) => {
+            if (err) console.error('❌ Erro ao garantir timezone:', err);
+            next();
+        });
+    } else {
+        // Para GET (leitura), não precisa reconfigurar
         next();
-    });
+    }
 });
 
 // Rota de teste
