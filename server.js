@@ -6,7 +6,10 @@ require('dotenv').config();
 const app = express();
 const port = 3000;
 
-// Middlewares - VERSÃO LIMPA (SEM DUPLICAÇÕES)
+// 🔥 FORÇAR TIMEZONE DO BRASIL (adicione no topo)
+process.env.TZ = 'America/Sao_Paulo';
+
+// Middlewares - CORRIGIDO (removidas as duplicações)
 app.use(cors({
     origin: ['http://localhost:3001', 'https://vailsonhair.com.br'],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -14,17 +17,14 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Conexão com MySQL
+// 🔥 Conexão com MySQL - ADICIONADO timezone
 const db = mysql.createConnection({
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'salao_beleza'
+    database: process.env.DB_NAME || 'salao_beleza',
+    timezone: '-03:00'  // 👈 ADICIONADO - Força UTC-3 (Brasília)
 });
 
 // Testar conexão
@@ -34,6 +34,23 @@ db.connect((err) => {
         return;
     }
     console.log('✅ Conectado ao MySQL!');
+    
+    // 🔥 ADICIONADO - Forçar timezone da sessão
+    db.query("SET SESSION time_zone = '-03:00'", (err) => {
+        if (err) {
+            console.error('❌ Erro ao setar timezone:', err);
+        } else {
+            console.log('✅ Timezone configurado para Brasília (UTC-3)');
+        }
+    });
+});
+
+// 🔥 ADICIONADO - Middleware para garantir timezone em todas as consultas
+app.use((req, res, next) => {
+    db.query("SET SESSION time_zone = '-03:00'", (err) => {
+        if (err) console.error('❌ Erro ao garantir timezone:', err);
+        next();
+    });
 });
 
 // Rota de teste
