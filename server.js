@@ -849,7 +849,7 @@ app.delete('/api/funcionarios/:id/adiantamentos/:adiantamentoId', (req, res) => 
 });
 
 // ============================================
-// ROTAS DE AGENDAMENTOS - COMPLETAS E CORRIGIDAS
+// ROTAS DE AGENDAMENTOS - SEM CONVERSÃO DE TIMEZONE
 // ============================================
 
 // Listar todos os agendamentos
@@ -888,7 +888,7 @@ app.get('/api/agendamentos', (req, res) => {
     });
 });
 
-// Buscar agendamentos por período (PRIMEIRA VERSÃO - ÚNICA)
+// Buscar agendamentos por período
 app.get('/api/agendamentos/periodo', (req, res) => {
     const { inicio, fim } = req.query;
     
@@ -1019,7 +1019,7 @@ app.get('/api/agendamentos/:id', (req, res) => {
     );
 });
 
-// Criar novo agendamento
+// 🔥 CRIAR NOVO AGENDAMENTO - SEM CONVERSÃO
 app.post('/api/agendamentos', (req, res) => {
     console.log('\n=== 🚀 CRIANDO NOVO AGENDAMENTO ===');
     console.log('📦 Body recebido:', JSON.stringify(req.body, null, 2));
@@ -1045,6 +1045,15 @@ app.post('/api/agendamentos', (req, res) => {
         return;
     }
     
+    console.log('📅 DATA_HORA RECEBIDA DO FRONTEND:', data_hora);
+    
+    // 🔥 NÃO FAZER NENHUMA CONVERSÃO! Usar exatamente o que veio
+    const dataHoraParaSalvar = data_hora;
+    const dataFormatada = data_hora.split('T')[0];
+    
+    console.log('📅 DATA_HORA PARA SALVAR (SEM CONVERSÃO):', dataHoraParaSalvar);
+    console.log('📅 DATA PARA VENDA:', dataFormatada);
+    
     // Buscar o preço do serviço
     db.query('SELECT preco FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
         if (errServ) {
@@ -1061,7 +1070,7 @@ app.post('/api/agendamentos', (req, res) => {
             (cliente_id, funcionario_id, servico_id, data_hora, status, observacoes, 
              valor_comissao, percentual_comissao, valor, forma_pagamento, bandeira_cartao, parcelas, data_pagamento) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [cliente_id, funcionario_id, servico_id, data_hora, status || 'agendado', 
+            [cliente_id, funcionario_id, servico_id, dataHoraParaSalvar, status || 'agendado', 
              observacoes || '', valor_comissao || 0, percentual_comissao || 0, precoServico,
              forma_pagamento, bandeira_cartao, parcelas || 1, data_pagamento],
             (err, result) => {
@@ -1073,23 +1082,10 @@ app.post('/api/agendamentos', (req, res) => {
                 
                 const agendamentoId = result.insertId;
                 console.log('✅ Agendamento criado com ID:', agendamentoId);
-                console.log('📊 Status do agendamento:', status);
                 
                 // 2. SE FOR CONCLUÍDO, INSERIR NA TABELA VENDAS
                 if (status === 'concluido') {
                     console.log('🟢 STATUS É CONCLUÍDO - Inserindo na tabela vendas...');
-                    
-                    const data = new Date(data_hora);
-                    const dataFormatada = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
-                    
-                    console.log('📅 Data formatada:', dataFormatada);
-                    console.log('📝 Dados para venda:', {
-                        funcionario_id,
-                        cliente_id,
-                        dataFormatada,
-                        precoServico,
-                        forma_pagamento: forma_pagamento || 'dinheiro'
-                    });
                     
                     db.query(
                         `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento) 
@@ -1097,10 +1093,7 @@ app.post('/api/agendamentos', (req, res) => {
                         [funcionario_id, cliente_id, dataFormatada, precoServico, forma_pagamento || 'dinheiro'],
                         (errVenda, resultVenda) => {
                             if (errVenda) {
-                                console.error('❌ ERRO AO REGISTRAR VENDA:');
-                                console.error('Código:', errVenda.code);
-                                console.error('Mensagem:', errVenda.message);
-                                console.error('SQL:', errVenda.sql);
+                                console.error('❌ ERRO AO REGISTRAR VENDA:', errVenda);
                             } else {
                                 console.log('✅ VENDA REGISTRADA COM SUCESSO! ID:', resultVenda.insertId);
                             }
@@ -1119,7 +1112,7 @@ app.post('/api/agendamentos', (req, res) => {
     });
 });
 
-// Atualizar agendamento
+// 🔥 ATUALIZAR AGENDAMENTO - SEM CONVERSÃO
 app.put('/api/agendamentos/:id', (req, res) => {
     const { 
         cliente_id, 
@@ -1137,7 +1130,7 @@ app.put('/api/agendamentos/:id', (req, res) => {
     } = req.body;
     
     console.log('📥 Atualizando agendamento ID:', req.params.id);
-    console.log('📦 Dados recebidos:', { status, forma_pagamento });
+    console.log('📦 DATA_HORA RECEBIDA:', data_hora);
     
     // Primeiro, buscar o agendamento atual para saber o status anterior
     db.query('SELECT * FROM agendamentos WHERE id = ?', [req.params.id], (errSelect, results) => {
@@ -1157,6 +1150,13 @@ app.put('/api/agendamentos/:id', (req, res) => {
         
         console.log('📊 Status anterior:', statusAnterior);
         console.log('📊 Novo status:', status);
+        
+        // 🔥 NÃO CONVERTER - usar exatamente o que veio
+        const dataHoraParaSalvar = data_hora;
+        const dataFormatada = data_hora ? data_hora.split('T')[0] : null;
+        
+        console.log('📅 DATA_HORA PARA SALVAR:', dataHoraParaSalvar);
+        console.log('📅 DATA PARA VENDA:', dataFormatada);
         
         // Buscar o preço do serviço
         db.query('SELECT preco FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
@@ -1183,7 +1183,7 @@ app.put('/api/agendamentos/:id', (req, res) => {
                 parcelas = ?,
                 data_pagamento = ?
                 WHERE id = ?`,
-                [cliente_id, funcionario_id, servico_id, data_hora, status, observacoes, 
+                [cliente_id, funcionario_id, servico_id, dataHoraParaSalvar, status, observacoes, 
                  valor_comissao, percentual_comissao, forma_pagamento, bandeira_cartao, 
                  parcelas || 1, data_pagamento, req.params.id],
                 (err, result) => {
@@ -1200,62 +1200,38 @@ app.put('/api/agendamentos/:id', (req, res) => {
                     
                     console.log('✅ Agendamento atualizado com sucesso');
                     
-                    // DATA FORMATADA para consultas na tabela vendas
-                    const data = new Date(data_hora || agendamentoAtual.data_hora);
-                    const dataFormatada = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
-                    
-                    // CASO 1: Status mudou para 'concluido' (inserir na tabela vendas)
+                    // Lógica de vendas (igual ao POST)
                     if (status === 'concluido' && statusAnterior !== 'concluido') {
                         console.log('🟢 STATUS MUDOU PARA CONCLUÍDO - Inserindo venda...');
-                        
                         db.query(
                             `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento) 
                              VALUES (?, ?, ?, ?, ?)`,
                             [funcionario_id, cliente_id, dataFormatada, precoServico, forma_pagamento || 'dinheiro'],
                             (errVenda) => {
-                                if (errVenda) {
-                                    console.error('❌ Erro ao registrar venda:', errVenda);
-                                } else {
-                                    console.log('✅ Venda registrada para agendamento concluído');
-                                }
+                                if (errVenda) console.error('❌ Erro ao registrar venda:', errVenda);
+                                else console.log('✅ Venda registrada');
                             }
                         );
-                    }
-                    
-                    // CASO 2: Status mudou de 'concluido' para outro (remover da tabela vendas)
-                    else if (statusAnterior === 'concluido' && status !== 'concluido') {
+                    } else if (statusAnterior === 'concluido' && status !== 'concluido') {
                         console.log('🟠 DEIXOU DE SER CONCLUÍDO - Removendo venda...');
-                        
                         db.query(
                             'DELETE FROM vendas WHERE funcionario_id = ? AND data_venda = ?',
                             [funcionario_id, dataFormatada],
                             (errVenda) => {
-                                if (errVenda) {
-                                    console.error('❌ Erro ao remover venda:', errVenda);
-                                } else {
-                                    console.log('✅ Venda removida (agendamento deixou de ser concluído)');
-                                }
+                                if (errVenda) console.error('❌ Erro ao remover venda:', errVenda);
+                                else console.log('✅ Venda removida');
                             }
                         );
-                    }
-                    
-                    // CASO 3: Já era concluído e continua concluído (atualizar venda)
-                    else if (status === 'concluido' && statusAnterior === 'concluido') {
+                    } else if (status === 'concluido' && statusAnterior === 'concluido') {
                         console.log('🔵 PERMANECE CONCLUÍDO - Atualizando venda...');
-                        
                         db.query(
                             'UPDATE vendas SET valor_total = ?, forma_pagamento = ? WHERE funcionario_id = ? AND data_venda = ?',
                             [precoServico, forma_pagamento, funcionario_id, dataFormatada],
                             (errVenda) => {
-                                if (errVenda) {
-                                    console.error('❌ Erro ao atualizar venda:', errVenda);
-                                } else {
-                                    console.log('✅ Venda atualizada');
-                                }
+                                if (errVenda) console.error('❌ Erro ao atualizar venda:', errVenda);
+                                else console.log('✅ Venda atualizada');
                             }
                         );
-                    } else {
-                        console.log('⚪ Nenhuma ação na tabela vendas necessária');
                     }
                     
                     res.json({ message: 'Agendamento atualizado com sucesso' });
@@ -1269,7 +1245,6 @@ app.put('/api/agendamentos/:id', (req, res) => {
 app.delete('/api/agendamentos/:id', (req, res) => {
     console.log('📥 Excluindo agendamento ID:', req.params.id);
     
-    // Primeiro buscar o agendamento para saber os detalhes
     db.query('SELECT * FROM agendamentos WHERE id = ?', [req.params.id], (err, results) => {
         if (err) {
             console.error('❌ Erro ao buscar agendamento:', err);
@@ -1284,7 +1259,6 @@ app.delete('/api/agendamentos/:id', (req, res) => {
         
         const agendamento = results[0];
         
-        // Deletar o agendamento
         db.query('DELETE FROM agendamentos WHERE id = ?', [req.params.id], (errDelete, resultDelete) => {
             if (errDelete) {
                 console.error('❌ Erro ao deletar agendamento:', errDelete);
@@ -1292,10 +1266,28 @@ app.delete('/api/agendamentos/:id', (req, res) => {
                 return;
             }
             
-            // Se o agendamento era concluído, remover também a venda correspondente
             if (agendamento.status === 'concluido') {
-                const data = new Date(agendamento.data_hora);
-                const dataFormatada = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
+                // 🔥 CORREÇÃO: Verificar o tipo de data_hora
+                let dataFormatada;
+                
+                if (agendamento.data_hora instanceof Date) {
+                    // Se for objeto Date, formatar para YYYY-MM-DD
+                    const ano = agendamento.data_hora.getFullYear();
+                    const mes = String(agendamento.data_hora.getMonth() + 1).padStart(2, '0');
+                    const dia = String(agendamento.data_hora.getDate()).padStart(2, '0');
+                    dataFormatada = `${ano}-${mes}-${dia}`;
+                    console.log('📅 Data do objeto Date:', dataFormatada);
+                } else if (typeof agendamento.data_hora === 'string') {
+                    // Se for string, extrair a data
+                    dataFormatada = agendamento.data_hora.split('T')[0];
+                    console.log('📅 Data da string:', dataFormatada);
+                } else {
+                    // Fallback
+                    dataFormatada = new Date(agendamento.data_hora).toISOString().split('T')[0];
+                    console.log('📅 Data convertida:', dataFormatada);
+                }
+                
+                console.log('🗑️ Removendo venda para data:', dataFormatada);
                 
                 db.query(
                     'DELETE FROM vendas WHERE funcionario_id = ? AND data_venda = ?',
@@ -1304,7 +1296,7 @@ app.delete('/api/agendamentos/:id', (req, res) => {
                         if (errVenda) {
                             console.error('❌ Erro ao remover venda:', errVenda);
                         } else {
-                            console.log('✅ Venda removida junto com o agendamento');
+                            console.log('✅ Venda removida com sucesso');
                         }
                     }
                 );
