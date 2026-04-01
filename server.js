@@ -1056,12 +1056,19 @@ app.post('/api/agendamentos', (req, res) => {
         }
         
         const precoServico = resultServ[0]?.preco || 0;
-        const percentualComissao = resultServ[0]?.comissao_percentual || 0; // 🔥 BUSCA DO BANCO!
-        const valorComissao = (precoServico * percentualComissao) / 100; // 🔥 CALCULA AQUI!
+        const percentualComissao = resultServ[0]?.comissao_percentual || 0;
+        
+        // 🔥 SÓ CALCULAR COMISSÃO SE O STATUS FOR "concluido"
+        let valorComissao = 0;
+        if (status === 'concluido') {
+            valorComissao = (precoServico * percentualComissao) / 100;
+            console.log('💰 Comissão calculada para conclusão:', valorComissao);
+        } else {
+            console.log('⚪ Agendamento não concluído, comissão = 0');
+        }
         
         console.log('💰 Preço do serviço:', precoServico);
         console.log('📊 Percentual de comissão do serviço:', percentualComissao, '%');
-        console.log('💰 Valor da comissão calculada:', valorComissao);
         
         db.query(
             `INSERT INTO agendamentos 
@@ -1070,8 +1077,8 @@ app.post('/api/agendamentos', (req, res) => {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [cliente_id, funcionario_id, servico_id, dataHoraParaSalvar, status || 'agendado', 
              observacoes || '', 
-             valorComissao,        // 🔥 CALCULADO NO BACKEND!
-             percentualComissao,   // 🔥 BUSCADO DO BANCO!
+             valorComissao,        // 🔥 0 se não concluído
+             percentualComissao,   // 🔥 Percentual do serviço
              precoServico,
              forma_pagamento, 
              bandeira_cartao, 
@@ -1116,7 +1123,7 @@ app.post('/api/agendamentos', (req, res) => {
     });
 });
 
-// 🔥 ATUALIZAR AGENDAMENTO - SEM CONVERSÃO
+// 🔥 ATUALIZAR AGENDAMENTO - CORRIGIDO (recalcula comissão quando concluído)
 app.put('/api/agendamentos/:id', (req, res) => {
     const { 
         cliente_id, 
@@ -1125,8 +1132,7 @@ app.put('/api/agendamentos/:id', (req, res) => {
         data_hora, 
         status, 
         observacoes,
-        valor_comissao,
-        percentual_comissao,
+        // 🔥 REMOVA valor_comissao e percentual_comissao daqui! O backend vai recalcular!
         forma_pagamento,
         bandeira_cartao,
         parcelas,
@@ -1155,21 +1161,33 @@ app.put('/api/agendamentos/:id', (req, res) => {
         console.log('📊 Status anterior:', statusAnterior);
         console.log('📊 Novo status:', status);
         
-        // 🔥 NÃO CONVERTER - usar exatamente o que veio
         const dataHoraParaSalvar = data_hora;
         const dataFormatada = data_hora ? data_hora.split('T')[0] : null;
         
         console.log('📅 DATA_HORA PARA SALVAR:', dataHoraParaSalvar);
         console.log('📅 DATA PARA VENDA:', dataFormatada);
         
-        // Buscar o preço do serviço
-        db.query('SELECT preco FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
+        // 🔥 BUSCAR O SERVIÇO COMPLETO (preço E comissão)
+        db.query('SELECT preco, comissao_percentual FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
             if (errServ) {
                 console.error('Erro ao buscar serviço:', errServ);
                 return res.status(500).json({ error: errServ.message });
             }
             
             const precoServico = resultServ[0]?.preco || 0;
+            const percentualComissao = resultServ[0]?.comissao_percentual || 0;
+            
+            // 🔥 SÓ CALCULAR COMISSÃO SE O STATUS FOR "concluido"
+            let valorComissao = 0;
+            if (status === 'concluido') {
+                valorComissao = (precoServico * percentualComissao) / 100;
+                console.log('💰 Comissão calculada para conclusão:', valorComissao);
+            } else {
+                console.log('⚪ Agendamento não concluído, comissão = 0');
+            }
+            
+            console.log('💰 Preço do serviço:', precoServico);
+            console.log('📊 Percentual de comissão do serviço:', percentualComissao, '%');
             
             // Atualizar o agendamento
             db.query(
@@ -1188,8 +1206,13 @@ app.put('/api/agendamentos/:id', (req, res) => {
                 data_pagamento = ?
                 WHERE id = ?`,
                 [cliente_id, funcionario_id, servico_id, dataHoraParaSalvar, status, observacoes, 
-                 valor_comissao, percentual_comissao, forma_pagamento, bandeira_cartao, 
-                 parcelas || 1, data_pagamento, req.params.id],
+                 valorComissao,           // 🔥 RECALCULADO AGORA!
+                 percentualComissao,      // 🔥 DO SERVIÇO!
+                 forma_pagamento, 
+                 bandeira_cartao, 
+                 parcelas || 1, 
+                 data_pagamento, 
+                 req.params.id],
                 (err, result) => {
                     if (err) {
                         console.error('❌ Erro ao atualizar agendamento:', err);
