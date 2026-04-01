@@ -1558,6 +1558,69 @@ app.get('/api/financeiro/resumo', (req, res) => {
 });
 
 // ============================================
+// ROTA DE COMISSÕES - CALCULADA COM BASE NOS AGENDAMENTOS CONCLUÍDOS
+// ============================================
+
+app.get('/api/financeiro/comissoes', (req, res) => {
+    console.log('\n=== 💰 ROTA /api/financeiro/comissoes ACESSADA ===');
+    console.log('📌 Query params:', req.query);
+    
+    const { mes, ano, funcionario_id } = req.query;
+    
+    if (!mes || !ano) {
+        res.status(400).json({ error: 'Mês e ano são obrigatórios' });
+        return;
+    }
+    
+    const mesNum = parseInt(mes);
+    const anoNum = parseInt(ano);
+    
+    let query = `
+        SELECT 
+            f.id as funcionario_id,
+            f.nome as funcionario_nome,
+            SUM(a.valor) as total_vendas,
+            SUM(a.valor_comissao) as total_comissao
+        FROM agendamentos a
+        INNER JOIN funcionarios f ON a.funcionario_id = f.id
+        WHERE a.status = 'concluido'
+        AND MONTH(a.data_hora) = ? 
+        AND YEAR(a.data_hora) = ?
+    `;
+    
+    const params = [mesNum, anoNum];
+    
+    if (funcionario_id && funcionario_id !== 'undefined' && funcionario_id !== '') {
+        query += ' AND a.funcionario_id = ?';
+        params.push(parseInt(funcionario_id));
+    }
+    
+    query += ' GROUP BY f.id, f.nome ORDER BY total_comissao DESC';
+    
+    console.log('📝 Query:', query);
+    console.log('📦 Params:', params);
+    
+    db.query(query, params, (err, results) => {
+        if (err) {
+            console.error('❌ Erro ao calcular comissões:', err);
+            res.status(500).json({ error: err.message });
+            return;
+        }
+        
+        const comissoes = results.map(row => ({
+            funcionario_id: row.funcionario_id,
+            funcionario_nome: row.funcionario_nome,
+            totalVendas: parseFloat(row.total_vendas) || 0,
+            comissao: parseFloat(row.total_comissao) || 0
+        }));
+        
+        console.log(`✅ Comissões calculadas para ${comissoes.length} funcionários`);
+        console.log('📊 Resultado:', JSON.stringify(comissoes, null, 2));
+        res.json(comissoes);
+    });
+});
+
+// ============================================
 // ROTAS DE ESTOQUE - COMPLETAS E CORRIGIDAS
 // ============================================
 
