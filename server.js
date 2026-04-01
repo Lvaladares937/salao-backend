@@ -1019,7 +1019,7 @@ app.get('/api/agendamentos/:id', (req, res) => {
     );
 });
 
-// 🔥 CRIAR NOVO AGENDAMENTO - SEM CONVERSÃO
+// 🔥 CRIAR NOVO AGENDAMENTO - CORRIGIDO (busca comissão do serviço)
 app.post('/api/agendamentos', (req, res) => {
     console.log('\n=== 🚀 CRIANDO NOVO AGENDAMENTO ===');
     console.log('📦 Body recebido:', JSON.stringify(req.body, null, 2));
@@ -1031,9 +1031,7 @@ app.post('/api/agendamentos', (req, res) => {
         data_hora, 
         status, 
         observacoes,
-        valor_comissao,
-        percentual_comissao,
-        valor,
+        // 🔥 REMOVA valor_comissao e percentual_comissao daqui!
         forma_pagamento,
         bandeira_cartao,
         parcelas,
@@ -1047,32 +1045,38 @@ app.post('/api/agendamentos', (req, res) => {
     
     console.log('📅 DATA_HORA RECEBIDA DO FRONTEND:', data_hora);
     
-    // 🔥 NÃO FAZER NENHUMA CONVERSÃO! Usar exatamente o que veio
     const dataHoraParaSalvar = data_hora;
     const dataFormatada = data_hora.split('T')[0];
     
-    console.log('📅 DATA_HORA PARA SALVAR (SEM CONVERSÃO):', dataHoraParaSalvar);
-    console.log('📅 DATA PARA VENDA:', dataFormatada);
-    
-    // Buscar o preço do serviço
-    db.query('SELECT preco FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
+    // 🔥 BUSCAR O SERVIÇO COMPLETO (preço E comissão)
+    db.query('SELECT preco, comissao_percentual FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
         if (errServ) {
             console.error('❌ Erro ao buscar serviço:', errServ);
             return res.status(500).json({ error: errServ.message });
         }
         
-        const precoServico = resultServ[0]?.preco || valor || 0;
-        console.log('💰 Preço do serviço:', precoServico);
+        const precoServico = resultServ[0]?.preco || 0;
+        const percentualComissao = resultServ[0]?.comissao_percentual || 0; // 🔥 BUSCA DO BANCO!
+        const valorComissao = (precoServico * percentualComissao) / 100; // 🔥 CALCULA AQUI!
         
-        // 1. INSERIR O AGENDAMENTO
+        console.log('💰 Preço do serviço:', precoServico);
+        console.log('📊 Percentual de comissão do serviço:', percentualComissao, '%');
+        console.log('💰 Valor da comissão calculada:', valorComissao);
+        
         db.query(
             `INSERT INTO agendamentos 
             (cliente_id, funcionario_id, servico_id, data_hora, status, observacoes, 
              valor_comissao, percentual_comissao, valor, forma_pagamento, bandeira_cartao, parcelas, data_pagamento) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [cliente_id, funcionario_id, servico_id, dataHoraParaSalvar, status || 'agendado', 
-             observacoes || '', valor_comissao || 0, percentual_comissao || 0, precoServico,
-             forma_pagamento, bandeira_cartao, parcelas || 1, data_pagamento],
+             observacoes || '', 
+             valorComissao,        // 🔥 CALCULADO NO BACKEND!
+             percentualComissao,   // 🔥 BUSCADO DO BANCO!
+             precoServico,
+             forma_pagamento, 
+             bandeira_cartao, 
+             parcelas || 1, 
+             data_pagamento],
             (err, result) => {
                 if (err) {
                     console.error('❌ Erro ao criar agendamento:', err);
