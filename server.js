@@ -1073,7 +1073,7 @@ app.post('/api/agendamentos', (req, res) => {
         db.query(
             `INSERT INTO agendamentos 
             (cliente_id, funcionario_id, servico_id, data_hora, status, observacoes, 
-             valor_comissao, percentual_comissao, valor, forma_pagamento, bandeira_cartao, parcelas, data_pagamento) 
+             percentual_comissao, valor, forma_pagamento, bandeira_cartao, parcelas, data_pagamento) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [cliente_id, funcionario_id, servico_id, dataHoraParaSalvar, status || 'agendado', 
              observacoes || '', 
@@ -2119,7 +2119,7 @@ app.get('/api/clientes', (req, res) => {
 });
 
 // ============================================
-// ROTAS DO CHATBOT - COMPLETAS E CORRIGIDAS
+// ROTAS DO CHATBOT - VERSÃO FINAL CORRIGIDA
 // ============================================
 
 // Status do bot
@@ -2132,203 +2132,118 @@ app.get('/api/bot/status', (req, res) => {
     });
 });
 
+// TESTE de conexão
+app.get('/api/bot/test', (req, res) => {
+    console.log('🔌 Teste de conexão');
+    res.json({ success: true, message: 'API está funcionando!' });
+});
+
 // LISTAR SERVIÇOS
 app.get('/api/bot/servicos', (req, res) => {
-    console.log('📋 Buscando serviços para o bot...');
-    db.query('SELECT id, nome, preco, duracao_minutos FROM servicos ORDER BY nome', (err, results) => {
+    console.log('📋 Buscando serviços...');
+    db.query('SELECT id, nome, preco FROM servicos ORDER BY nome', (err, results) => {
         if (err) {
-            console.error('❌ Erro ao buscar serviços:', err);
-            res.status(500).json({ error: err.message });
-            return;
+            console.error('❌ Erro:', err);
+            return res.status(500).json({ error: err.message });
         }
-        console.log(`✅ ${results.length} serviços encontrados`);
         res.json(results);
     });
 });
 
 // LISTAR PROFISSIONAIS
 app.get('/api/bot/profissionais', (req, res) => {
-    console.log('👤 Buscando profissionais para o bot...');
-    db.query('SELECT id, nome, especialidade FROM funcionarios WHERE ativo = true ORDER BY nome', (err, results) => {
+    console.log('👤 Buscando profissionais...');
+    db.query('SELECT id, nome, especialidade FROM funcionarios WHERE ativo = 1 ORDER BY nome', (err, results) => {
         if (err) {
-            console.error('❌ Erro ao buscar profissionais:', err);
-            res.status(500).json({ error: err.message });
-            return;
+            console.error('❌ Erro:', err);
+            return res.status(500).json({ error: err.message });
         }
-        console.log(`✅ ${results.length} profissionais encontrados`);
         res.json(results);
     });
 });
 
-// VERIFICAR DISPONIBILIDADE COM PROFISSIONAIS
-app.get('/api/bot/disponibilidade', (req, res) => {
-    console.log('📅 Verificando disponibilidade para o bot...');
-    const { data, servico_id } = req.query;
-    
-    if (!data || !servico_id) {
-        return res.status(400).json({ error: 'Data e serviço são obrigatórios' });
-    }
-    
-    db.query('SELECT id, nome, especialidade FROM funcionarios WHERE ativo = true ORDER BY nome', (err, todosProfissionais) => {
-        if (err) {
-            console.error('❌ Erro ao buscar profissionais:', err);
-            return res.status(500).json({ error: err.message });
-        }
-        
-        const totalProfissionais = todosProfissionais.length;
-        const horariosDetalhados = [];
-        const horariosDisponiveis = [];
-        let horariosProcessados = 0;
-        
-        for (let hora = 9; hora <= 18; hora++) {
-            const horario = `${hora.toString().padStart(2, '0')}:00`;
-            
-            db.query(
-                `SELECT funcionario_id FROM agendamentos 
-                 WHERE DATE(data_hora) = ? AND HOUR(data_hora) = ? 
-                 AND status NOT IN ('cancelado', 'cancelada')`,
-                [data, hora],
-                (err, agendamentos) => {
-                    if (err) {
-                        console.error(`Erro na hora ${hora}:`, err);
-                        return;
-                    }
-                    
-                    const ocupadosIds = agendamentos.map(a => a.funcionario_id);
-                    const disponiveis = todosProfissionais.filter(p => !ocupadosIds.includes(p.id));
-                    
-                    horariosDetalhados.push({
-                        horario,
-                        ocupados: ocupadosIds.length,
-                        disponiveis: disponiveis.length,
-                        profissionais_disponiveis: disponiveis.map(p => ({
-                            id: p.id,
-                            nome: p.nome,
-                            especialidade: p.especialidade
-                        }))
-                    });
-                    
-                    if (disponiveis.length > 0) {
-                        horariosDisponiveis.push(horario);
-                    }
-                    
-                    horariosProcessados++;
-                    
-                    if (horariosProcessados === 10) {
-                        horariosDetalhados.sort((a, b) => a.horario.localeCompare(b.horario));
-                        res.json({
-                            data,
-                            servico_id,
-                            total_profissionais: totalProfissionais,
-                            horarios_disponiveis: horariosDisponiveis,
-                            horarios_detalhados: horariosDetalhados
-                        });
-                    }
-                }
-            );
-        }
-    });
-});
-
-// VERIFICAR AGENDA REAL DO PROFISSIONAL (COM FILTRO DE HORÁRIOS OCUPADOS)
+// AGENDA DO PROFISSIONAL
 app.get('/api/bot/profissional/:id/agenda', (req, res) => {
     const { id } = req.params;
+    const { data } = req.query;
     
-    console.log(`📅 Buscando agenda real do profissional ${id}`);
+    console.log(`📅 Agenda do profissional ${id}${data ? ` para ${data}` : ''}`);
     
-    db.query('SELECT nome FROM funcionarios WHERE id = ? AND ativo = true', [id], (err, profInfo) => {
-        if (err || profInfo.length === 0) {
+    db.query('SELECT id, nome FROM funcionarios WHERE id = ? AND ativo = 1', [id], (err, prof) => {
+        if (err || prof.length === 0) {
             return res.status(404).json({ error: 'Profissional não encontrado' });
         }
         
-        const profissional = profInfo[0];
+        let dataInicio, dataFim;
+        const hoje = new Date().toISOString().split('T')[0];
         
-        // Buscar TODOS os agendamentos do profissional nos próximos 30 dias
-        const hoje = new Date();
-        hoje.setHours(0, 0, 0, 0);
-        
-        const fim = new Date(hoje);
-        fim.setDate(fim.getDate() + 30);
-        
-        const hojeStr = hoje.toISOString().split('T')[0];
-        const fimStr = fim.toISOString().split('T')[0];
-        
-        console.log(`📅 Período: ${hojeStr} até ${fimStr}`);
+        if (data) {
+            dataInicio = data;
+            dataFim = data;
+        } else {
+            dataInicio = hoje;
+            const fim = new Date();
+            fim.setDate(fim.getDate() + 30);
+            dataFim = fim.toISOString().split('T')[0];
+        }
         
         db.query(
-            `SELECT DATE(data_hora) as data, HOUR(data_hora) as hora, status
+            `SELECT DATE(data_hora) as data, HOUR(data_hora) as hora 
              FROM agendamentos 
              WHERE funcionario_id = ? 
-             AND DATE(data_hora) >= ?
-             AND DATE(data_hora) <= ?
+             AND DATE(data_hora) BETWEEN ? AND ?
              AND status NOT IN ('cancelado', 'cancelada')`,
-            [id, hojeStr, fimStr],
-            (err, agendamentos) => {
+            [id, dataInicio, dataFim],
+            (err, ocupados) => {
                 if (err) {
-                    console.error('❌ Erro ao buscar agendamentos:', err);
                     return res.status(500).json({ error: err.message });
                 }
                 
-                console.log(`📊 Agendamentos encontrados: ${agendamentos.length}`);
-                
-                // Mapear horários ocupados por dia
-                const ocupados = {};
-                agendamentos.forEach(ag => {
-                    if (!ocupados[ag.data]) {
-                        ocupados[ag.data] = [];
-                    }
-                    ocupados[ag.data].push(ag.hora);
+                const ocupadosMap = {};
+                ocupados.forEach(o => {
+                    if (!ocupadosMap[o.data]) ocupadosMap[o.data] = [];
+                    ocupadosMap[o.data].push(o.hora);
                 });
                 
-                console.log('📅 Horários ocupados:', JSON.stringify(ocupados, null, 2));
-                
-                // Gerar dias disponíveis para os próximos 14 dias
                 const diasDisponiveis = [];
-                const dataAtual = new Date(hoje);
+                const dataAtual = new Date(dataInicio);
+                let dias = 0;
+                const maxDias = data ? 1 : 14;
                 
-                for (let i = 0; i < 14; i++) {
+                while (dias < maxDias) {
                     const dataStr = dataAtual.toISOString().split('T')[0];
                     const diaSemana = dataAtual.getDay();
-                    const mes = dataAtual.getMonth() + 1;
-                    const dia = dataAtual.getDate();
-                    const ano = dataAtual.getFullYear();
                     
-                    const dataFormatada = `${dia.toString().padStart(2, '0')}/${mes.toString().padStart(2, '0')}/${ano}`;
-                    
-                    // Verificar se é dia de funcionamento (segunda a sábado)
-                    if (diaSemana !== 0) {
+                    if (diaSemana >= 1 && diaSemana <= 5) {
                         const horariosDisponiveis = [];
-                        const ocupadosHoje = ocupados[dataStr] || [];
+                        const ocupadosHoje = ocupadosMap[dataStr] || [];
                         
-                        console.log(`📅 ${dataFormatada}: ocupados = [${ocupadosHoje.join(', ')}]`);
-                        
-                        // Horários de funcionamento: 9h às 18h
                         for (let hora = 9; hora <= 18; hora++) {
-                            const horario = `${hora.toString().padStart(2, '0')}:00`;
                             if (!ocupadosHoje.includes(hora)) {
-                                horariosDisponiveis.push(horario);
+                                horariosDisponiveis.push(`${hora.toString().padStart(2, '0')}:00`);
                             }
                         }
                         
                         if (horariosDisponiveis.length > 0) {
+                            const dia = dataAtual.getDate();
+                            const mes = dataAtual.getMonth() + 1;
+                            const ano = dataAtual.getFullYear();
+                            
                             diasDisponiveis.push({
                                 data: dataStr,
-                                data_formatada: dataFormatada,
-                                dia_semana: diaSemana,
-                                horarios_disponiveis: horariosDisponiveis,
-                                total_horarios: horariosDisponiveis.length
+                                data_formatada: `${dia.toString().padStart(2, '0')}/${mes.toString().padStart(2, '0')}/${ano}`,
+                                horarios_disponiveis: horariosDisponiveis
                             });
                         }
                     }
                     
                     dataAtual.setDate(dataAtual.getDate() + 1);
+                    dias++;
                 }
-                
-                console.log(`✅ Dias com horários: ${diasDisponiveis.length}`);
                 
                 res.json({
                     profissional_id: id,
-                    profissional_nome: profissional.nome,
+                    profissional_nome: prof[0].nome,
                     dias_disponiveis: diasDisponiveis
                 });
             }
@@ -2336,38 +2251,133 @@ app.get('/api/bot/profissional/:id/agenda', (req, res) => {
     });
 });
 
-// ============================================
-// NOVAS ROTAS PARA O BOT INTELIGENTE
-// ============================================
+// VERIFICAR DISPONIBILIDADE ESPECÍFICA
+app.get('/api/bot/profissional/:id/disponibilidade', (req, res) => {
+    const { id } = req.params;
+    const { data, horario } = req.query;
+    
+    if (!data || !horario) {
+        return res.status(400).json({ error: 'Data e horário são obrigatórios' });
+    }
+    
+    const hora = parseInt(horario.split(':')[0]);
+    
+    db.query(
+        `SELECT id FROM agendamentos 
+         WHERE funcionario_id = ? 
+         AND DATE(data_hora) = ? 
+         AND HOUR(data_hora) = ?
+         AND status NOT IN ('cancelado', 'cancelada')`,
+        [id, data, hora],
+        (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: err.message });
+            }
+            
+            res.json({ disponivel: results.length === 0 });
+        }
+    );
+});
 
-// BUSCAR CLIENTE POR TELEFONE OU NOME
+// BUSCAR CLIENTE
 app.get('/api/bot/clientes/buscar', (req, res) => {
     const { telefone, nome } = req.query;
     
-    console.log('🔍 Buscando cliente:', { telefone, nome });
-    
-    let query = 'SELECT id, nome, telefone, email FROM clientes WHERE ';
-    let params = [];
+    let query = 'SELECT id, nome, telefone, email FROM clientes WHERE 1=1';
+    const params = [];
     
     if (telefone) {
-        query += 'telefone LIKE ?';
-        params.push(`%${telefone}%`);
-    } else if (nome) {
-        query += 'nome LIKE ?';
-        params.push(`%${nome}%`);
-    } else {
-        return res.json([]);
+        let telefoneLimpo = String(telefone).replace(/\D/g, '');
+        query += ' AND (telefone = ? OR telefone LIKE ?)';
+        params.push(telefoneLimpo, `%${telefoneLimpo}%`);
+        console.log('📞 Buscando telefone:', telefoneLimpo);
+    }
+    
+    if (nome) {
+        query += ' AND nome = ?';
+        params.push(nome);
+        console.log('📝 Buscando nome exato:', nome);
     }
     
     query += ' LIMIT 5';
     
     db.query(query, params, (err, results) => {
         if (err) {
-            console.error('❌ Erro ao buscar cliente:', err);
+            console.error('❌ Erro buscar cliente:', err);
             return res.status(500).json({ error: err.message });
         }
-        console.log(`✅ ${results.length} clientes encontrados`);
         res.json(results);
+    });
+});
+
+// ATUALIZAR TELEFONE DO CLIENTE
+app.put('/api/bot/clientes/:id/telefone', (req, res) => {
+    const { id } = req.params;
+    const { telefone } = req.body;
+    
+    let telefoneLimpo = String(telefone).replace(/\D/g, '');
+    
+    if (telefoneLimpo.length === 10) {
+        telefoneLimpo = telefoneLimpo.substring(0, 2) + '9' + telefoneLimpo.substring(2);
+    }
+    
+    console.log('📞 Atualizando telefone do cliente:', id, 'para:', telefoneLimpo);
+    
+    db.query('UPDATE clientes SET telefone = ? WHERE id = ?', [telefoneLimpo, id], (err, result) => {
+        if (err) {
+            console.error('❌ Erro ao atualizar telefone:', err);
+            return res.status(500).json({ error: err.message });
+        }
+        res.json({ success: true });
+    });
+});
+
+// CRIAR CLIENTE COMPLETO
+app.post('/api/bot/clientes/completo', (req, res) => {
+    const { nome, telefone, email, data_nascimento } = req.body;
+    
+    console.log('📝 Criando cliente completo:', { nome, telefone, email, data_nascimento });
+    
+    // Validar telefone
+    let telefoneLimpo = String(telefone || '').replace(/\D/g, '');
+    
+    // Garantir 11 dígitos
+    if (telefoneLimpo.length === 10) {
+        telefoneLimpo = telefoneLimpo.substring(0, 2) + '9' + telefoneLimpo.substring(2);
+    }
+    
+    console.log('📞 Telefone limpo:', telefoneLimpo);
+    
+    // Verificar se cliente já existe pelo telefone ou email
+    db.query('SELECT id FROM clientes WHERE telefone = ? OR email = ?', [telefoneLimpo, email], (err, existing) => {
+        if (err) {
+            console.error('❌ Erro ao verificar cliente:', err);
+            return res.status(500).json({ error: err.message });
+        }
+        
+        if (existing.length > 0) {
+            console.log(`✅ Cliente já existe com ID: ${existing[0].id}`);
+            return res.json({ id: existing[0].id, nome, telefone: telefoneLimpo, email });
+        }
+        
+        // Inserir novo cliente
+        const query = `INSERT INTO clientes (nome, telefone, email, data_nascimento, data_cadastro) 
+                       VALUES (?, ?, ?, ?, NOW())`;
+        
+        db.query(query, [nome, telefoneLimpo, email, data_nascimento || null], (err, result) => {
+            if (err) {
+                console.error('❌ Erro ao criar cliente:', err);
+                return res.status(500).json({ error: err.message });
+            }
+            console.log(`✅ Cliente criado com sucesso! ID: ${result.insertId}`);
+            res.json({ 
+                id: result.insertId, 
+                nome, 
+                telefone: telefoneLimpo, 
+                email, 
+                data_nascimento: data_nascimento || null 
+            });
+        });
     });
 });
 
@@ -2375,168 +2385,114 @@ app.get('/api/bot/clientes/buscar', (req, res) => {
 app.get('/api/bot/clientes/:id/agendamentos', (req, res) => {
     const { id } = req.params;
     
-    console.log(`📅 Buscando agendamentos do cliente ${id}`);
-    
     db.query(
-        `SELECT a.id, a.data_hora, a.status, 
-                f.nome as profissional_nome,
-                s.nome as servico_nome,
-                s.preco as valor
+        `SELECT a.*, f.nome as profissional_nome, s.nome as servico_nome, s.preco
          FROM agendamentos a
          LEFT JOIN funcionarios f ON a.funcionario_id = f.id
          LEFT JOIN servicos s ON a.servico_id = s.id
          WHERE a.cliente_id = ?
-         ORDER BY a.data_hora DESC`,
+         ORDER BY a.data_hora DESC
+         LIMIT 20`,
         [id],
         (err, results) => {
             if (err) {
-                console.error('❌ Erro ao buscar agendamentos:', err);
                 return res.status(500).json({ error: err.message });
             }
-            console.log(`✅ ${results.length} agendamentos encontrados`);
             res.json(results);
         }
     );
 });
 
-// CRIAR CLIENTE VIA BOT
-app.post('/api/bot/clientes', (req, res) => {
-    const { nome, telefone } = req.body;
-    
-    console.log('📝 Criando novo cliente:', { nome, telefone });
-    
-    if (!nome || !telefone) {
-        return res.status(400).json({ error: 'Nome e telefone são obrigatórios' });
-    }
-    
-    db.query(
-        'INSERT INTO clientes (nome, telefone) VALUES (?, ?)',
-        [nome, telefone],
-        (err, result) => {
-            if (err) {
-                console.error('❌ Erro ao criar cliente:', err);
-                return res.status(500).json({ error: err.message });
-            }
-            console.log(`✅ Cliente criado ID: ${result.insertId}`);
-            res.json({ id: result.insertId, nome, telefone });
-        }
-    );
-});
-
-// CANCELAR AGENDAMENTO VIA BOT
-app.put('/api/bot/agendamentos/:id/cancelar', (req, res) => {
-    const { id } = req.params;
-    
-    console.log(`🗑️ Cancelando agendamento ID: ${id}`);
-    
-    db.query(
-        'UPDATE agendamentos SET status = ? WHERE id = ?',
-        ['cancelado', id],
-        (err, result) => {
-            if (err) {
-                console.error('❌ Erro ao cancelar agendamento:', err);
-                return res.status(500).json({ error: err.message });
-            }
-            console.log(`✅ Agendamento ${id} cancelado`);
-            res.json({ success: true, message: 'Agendamento cancelado com sucesso' });
-        }
-    );
-});
-
-// CRIAR AGENDAMENTO COM ESCOLHA DE PROFISSIONAL (CORRIGIDO)
+// CRIAR AGENDAMENTO
 app.post('/api/bot/agendamentos', (req, res) => {
-    console.log('\n=== 📝 CRIANDO AGENDAMENTO VIA BOT ===');
-    console.log('📦 Dados recebidos:', JSON.stringify(req.body, null, 2));
+    const { nome_cliente, telefone_cliente, cliente_id, servico_id, data, horario, profissional_id } = req.body;
     
-    const { nome_cliente, telefone_cliente, servico_id, data, horario, profissional_id } = req.body;
+    console.log('📝 Criando agendamento:', { nome_cliente, data, horario, profissional_id });
     
-    if (!nome_cliente || !telefone_cliente || !servico_id || !data || !horario) {
-        return res.status(400).json({ error: 'Dados incompletos' });
-    }
-    
-    // 🔥 VERIFICAR SE O HORÁRIO JÁ ESTÁ OCUPADO
-    const dataHora = `${data} ${horario}:00`;
-    const hora = horario.split(':')[0];
+    const hora = parseInt(horario.split(':')[0]);
+    const dataHora = `${data} ${hora.toString().padStart(2, '0')}:00:00`;
     
     db.query(
         `SELECT id FROM agendamentos 
          WHERE funcionario_id = ? 
          AND DATE(data_hora) = ? 
-         AND HOUR(data_hora) = ? 
+         AND HOUR(data_hora) = ?
          AND status NOT IN ('cancelado', 'cancelada')`,
         [profissional_id, data, hora],
-        (err, ocupado) => {
+        (err, ocupados) => {
             if (err) {
-                console.error('❌ Erro ao verificar disponibilidade:', err);
-                return res.status(500).json({ error: 'Erro ao verificar disponibilidade' });
+                return res.status(500).json({ error: err.message });
             }
             
-            if (ocupado.length > 0) {
-                console.log(`⚠️ Horário ${data} ${horario} já está ocupado!`);
-                return res.status(400).json({ 
-                    error: 'Horário não disponível',
-                    message: 'Este horário já está reservado. Escolha outro horário.'
-                });
+            if (ocupados.length > 0) {
+                return res.status(409).json({ error: 'Horário já ocupado' });
             }
             
-            // Continuar com a criação do agendamento...
-            db.query('SELECT id, nome, preco FROM servicos WHERE id = ?', [servico_id], (err, servicoResult) => {
-                if (err || servicoResult.length === 0) {
-                    return res.status(404).json({ error: 'Serviço não encontrado' });
+            const buscarOuCriarCliente = () => {
+                if (cliente_id) {
+                    return Promise.resolve(cliente_id);
                 }
                 
-                const servico = servicoResult[0];
-                const preco = parseFloat(servico.preco);
-                const valor_comissao = preco * 0.3;
-                
-                db.query('SELECT id FROM clientes WHERE telefone = ?', [telefone_cliente], (err, clienteResult) => {
-                    if (err) return res.status(500).json({ error: 'Erro ao buscar cliente' });
+                return new Promise((resolve, reject) => {
+                    const telefoneLimpo = telefone_cliente.replace(/\D/g, '');
                     
-                    let cliente_id;
-                    
-                    if (clienteResult.length > 0) {
-                        cliente_id = clienteResult[0].id;
-                        criarAgendamento(cliente_id);
-                    } else {
-                        db.query(
-                            'INSERT INTO clientes (nome, telefone) VALUES (?, ?)',
-                            [nome_cliente, telefone_cliente],
-                            (err, result) => {
-                                if (err) return res.status(500).json({ error: 'Erro ao criar cliente' });
-                                cliente_id = result.insertId;
-                                criarAgendamento(cliente_id);
-                            }
-                        );
-                    }
-                    
-                    function criarAgendamento(cliente_id) {
-                        const query = `
-                            INSERT INTO agendamentos 
-                            (cliente_id, funcionario_id, servico_id, data_hora, status, valor, valor_comissao) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        `;
+                    db.query('SELECT id FROM clientes WHERE telefone = ?', [telefoneLimpo], (err, results) => {
+                        if (err) return reject(err);
                         
-                        db.query(
-                            query,
-                            [cliente_id, profissional_id, servico_id, dataHora, 'agendado', preco, valor_comissao],
-                            (err, result) => {
-                                if (err) {
-                                    console.error('❌ Erro ao criar agendamento:', err);
-                                    return res.status(500).json({ error: 'Erro ao criar agendamento' });
+                        if (results.length > 0) {
+                            resolve(results[0].id);
+                        } else {
+                            db.query(
+                                'INSERT INTO clientes (nome, telefone, data_cadastro) VALUES (?, ?, NOW())',
+                                [nome_cliente, telefoneLimpo],
+                                (err, result) => {
+                                    if (err) return reject(err);
+                                    resolve(result.insertId);
                                 }
-                                
-                                console.log(`✅ Agendamento criado ID: ${result.insertId}`);
-                                
-                                res.json({ 
-                                    success: true, 
-                                    id: result.insertId,
-                                    message: 'Agendamento criado com sucesso'
-                                });
-                            }
-                        );
-                    }
+                            );
+                        }
+                    });
                 });
-            });
+            };
+            
+            buscarOuCriarCliente()
+                .then(idCliente => {
+                    db.query(
+                        `INSERT INTO agendamentos 
+                         (cliente_id, funcionario_id, servico_id, data_hora, status) 
+                         VALUES (?, ?, ?, ?, 'confirmado')`,
+                        [idCliente, profissional_id, servico_id, dataHora],
+                        (err, result) => {
+                            if (err) {
+                                console.error('❌ Erro no INSERT:', err);
+                                return res.status(500).json({ error: err.message });
+                            }
+                            
+                            console.log(`✅ Agendamento criado! ID: ${result.insertId}`);
+                            res.json({ id: result.insertId, success: true });
+                        }
+                    );
+                })
+                .catch(err => {
+                    console.error('❌ Erro ao buscar/criar cliente:', err);
+                    res.status(500).json({ error: err.message });
+                });
+        }
+    );
+});
+
+// CANCELAR AGENDAMENTO
+app.put('/api/bot/agendamentos/:id/cancelar', (req, res) => {
+    const { id } = req.params;
+    
+    db.query(
+        'UPDATE agendamentos SET status = "cancelado" WHERE id = ?',
+        [id],
+        (err, result) => {
+            if (err) {
+                return res.status(500).json({ error: err.message });
+            }
+            res.json({ success: true });
         }
     );
 });
@@ -2544,17 +2500,10 @@ app.post('/api/bot/agendamentos', (req, res) => {
 // INFO DO SALÃO
 app.get('/api/bot/salao', (req, res) => {
     res.json({
-        nome: process.env.SALAO_NOME || "Vailson's Hair & Makeup",
-        endereco: process.env.SALAO_ENDERECO || "Asa Sul CLS 210 Bloco B Loja 18 - Brasília",
-        telefone: process.env.SALAO_TELEFONE || "(61) 3244-4181",
-        horario: "Segunda a Sexta: 9h às 19h | Sábado: 9h às 17h",
-        instagram: "@vailsonhair"
+        nome: "Vailson's Hair & Makeup",
+        endereco: "Asa Sul CLS 210 Bloco B Loja 18 - Brasília",
+        telefone: "(61) 3244-4181"
     });
-});
-
-// ROTA DE TESTE
-app.get('/api/bot/test', (req, res) => {
-    res.json({ message: 'Bot API está funcionando!' });
 });
 
 // ============================================
