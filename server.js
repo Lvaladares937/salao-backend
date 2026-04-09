@@ -1019,7 +1019,7 @@ app.get('/api/agendamentos/:id', (req, res) => {
     );
 });
 
-// 🔥 CRIAR NOVO AGENDAMENTO - CORRIGIDO (busca comissão do serviço)
+// 🔥 CRIAR NOVO AGENDAMENTO - CORRIGIDO
 app.post('/api/agendamentos', (req, res) => {
     console.log('\n=== 🚀 CRIANDO NOVO AGENDAMENTO ===');
     console.log('📦 Body recebido:', JSON.stringify(req.body, null, 2));
@@ -1031,7 +1031,6 @@ app.post('/api/agendamentos', (req, res) => {
         data_hora, 
         status, 
         observacoes,
-        // 🔥 REMOVA valor_comissao e percentual_comissao daqui!
         forma_pagamento,
         bandeira_cartao,
         parcelas,
@@ -1048,17 +1047,21 @@ app.post('/api/agendamentos', (req, res) => {
     const dataHoraParaSalvar = data_hora;
     const dataFormatada = data_hora.split('T')[0];
     
-    // 🔥 BUSCAR O SERVIÇO COMPLETO (preço E comissão)
+    // BUSCAR O SERVIÇO COMPLETO
     db.query('SELECT preco, comissao_percentual FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
         if (errServ) {
             console.error('❌ Erro ao buscar serviço:', errServ);
             return res.status(500).json({ error: errServ.message });
         }
         
-        const precoServico = resultServ[0]?.preco || 0;
-        const percentualComissao = resultServ[0]?.comissao_percentual || 0;
+        if (!resultServ || resultServ.length === 0) {
+            return res.status(404).json({ error: 'Serviço não encontrado' });
+        }
         
-        // 🔥 SÓ CALCULAR COMISSÃO SE O STATUS FOR "concluido"
+        const precoServico = resultServ[0].preco || 0;
+        const percentualComissao = resultServ[0].comissao_percentual || 0;
+        
+        // SÓ CALCULAR COMISSÃO SE O STATUS FOR "concluido"
         let valorComissao = 0;
         if (status === 'concluido') {
             valorComissao = (precoServico * percentualComissao) / 100;
@@ -1068,22 +1071,40 @@ app.post('/api/agendamentos', (req, res) => {
         }
         
         console.log('💰 Preço do serviço:', precoServico);
-        console.log('📊 Percentual de comissão do serviço:', percentualComissao, '%');
+        console.log('📊 Percentual de comissão:', percentualComissao, '%');
         
+        // 🔥 QUERY CORRIGIDA - Ordem dos campos corrigida
         db.query(
-            `INSERT INTO agendamentos 
-            (cliente_id, funcionario_id, servico_id, data_hora, status, observacoes, 
-             percentual_comissao, valor, forma_pagamento, bandeira_cartao, parcelas, data_pagamento) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [cliente_id, funcionario_id, servico_id, dataHoraParaSalvar, status || 'agendado', 
-             observacoes || '', 
-             valorComissao,        // 🔥 0 se não concluído
-             percentualComissao,   // 🔥 Percentual do serviço
-             precoServico,
-             forma_pagamento, 
-             bandeira_cartao, 
-             parcelas || 1, 
-             data_pagamento],
+            `INSERT INTO agendamentos (
+                cliente_id, 
+                funcionario_id, 
+                servico_id, 
+                data_hora, 
+                status, 
+                observacoes,
+                valor_comissao,      // ← ordem corrigida
+                percentual_comissao, // ← ordem corrigida
+                valor,               // ← preço do serviço
+                forma_pagamento,
+                bandeira_cartao,
+                parcelas,
+                data_pagamento
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                cliente_id,
+                funcionario_id,
+                servico_id,
+                dataHoraParaSalvar,
+                status || 'agendado',
+                observacoes || '',
+                valorComissao,      // valor_comissao
+                percentualComissao, // percentual_comissao
+                precoServico,       // valor (preço)
+                forma_pagamento,
+                bandeira_cartao,
+                parcelas || 1,
+                data_pagamento
+            ],
             (err, result) => {
                 if (err) {
                     console.error('❌ Erro ao criar agendamento:', err);
@@ -1094,7 +1115,7 @@ app.post('/api/agendamentos', (req, res) => {
                 const agendamentoId = result.insertId;
                 console.log('✅ Agendamento criado com ID:', agendamentoId);
                 
-                // 2. SE FOR CONCLUÍDO, INSERIR NA TABELA VENDAS
+                // SE FOR CONCLUÍDO, INSERIR NA TABELA VENDAS
                 if (status === 'concluido') {
                     console.log('🟢 STATUS É CONCLUÍDO - Inserindo na tabela vendas...');
                     
