@@ -1038,16 +1038,18 @@ app.post('/api/agendamentos', (req, res) => {
     } = req.body;
     
     if (!cliente_id || !funcionario_id || !servico_id || !data_hora) {
-        res.status(400).json({ error: 'Cliente, funcionário, serviço e data/hora são obrigatórios' });
-        return;
+        return res.status(400).json({ error: 'Cliente, funcionário, serviço e data/hora são obrigatórios' });
     }
     
-    console.log('📅 DATA_HORA RECEBIDA DO FRONTEND:', data_hora);
+    console.log('📅 DATA_HORA RECEBIDA:', data_hora);
     
-    const dataHoraParaSalvar = data_hora;
+    // Converter data_hora para o formato MySQL DATETIME
+    const dataHoraMySQL = data_hora.replace('T', ' ').replace('Z', '');
+    console.log('📅 DATA_HORA CONVERTIDA:', dataHoraMySQL);
+    
     const dataFormatada = data_hora.split('T')[0];
     
-    // BUSCAR O SERVIÇO COMPLETO
+    // Buscar o serviço
     db.query('SELECT preco, comissao_percentual FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
         if (errServ) {
             console.error('❌ Erro ao buscar serviço:', errServ);
@@ -1061,86 +1063,92 @@ app.post('/api/agendamentos', (req, res) => {
         const precoServico = resultServ[0].preco || 0;
         const percentualComissao = resultServ[0].comissao_percentual || 0;
         
-        // SÓ CALCULAR COMISSÃO SE O STATUS FOR "concluido"
+        // Calcular comissão apenas se concluído
         let valorComissao = 0;
         if (status === 'concluido') {
             valorComissao = (precoServico * percentualComissao) / 100;
-            console.log('💰 Comissão calculada para conclusão:', valorComissao);
-        } else {
-            console.log('⚪ Agendamento não concluído, comissão = 0');
+            console.log('💰 Comissão calculada:', valorComissao);
         }
         
-        console.log('💰 Preço do serviço:', precoServico);
-        console.log('📊 Percentual de comissão:', percentualComissao, '%');
-        
-        // 🔥 QUERY CORRIGIDA - Ordem dos campos corrigida
-        db.query(
-            `INSERT INTO agendamentos (
-                cliente_id, 
-                funcionario_id, 
-                servico_id, 
-                data_hora, 
-                status, 
+        // 🔥 QUERY CORRETA - seguindo a ordem da tabela
+        const query = `
+            INSERT INTO agendamentos (
+                cliente_id,
+                funcionario_id,
+                servico_id,
+                data_hora,
+                status,
                 observacoes,
-                valor_comissao,      // ← ordem corrigida
-                percentual_comissao, // ← ordem corrigida
-                valor,               // ← preço do serviço
+                valor_comissao,
+                percentual_comissao,
+                valor,
                 forma_pagamento,
                 bandeira_cartao,
                 parcelas,
                 data_pagamento
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                cliente_id,
-                funcionario_id,
-                servico_id,
-                dataHoraParaSalvar,
-                status || 'agendado',
-                observacoes || '',
-                valorComissao,      // valor_comissao
-                percentualComissao, // percentual_comissao
-                precoServico,       // valor (preço)
-                forma_pagamento,
-                bandeira_cartao,
-                parcelas || 1,
-                data_pagamento
-            ],
-            (err, result) => {
-                if (err) {
-                    console.error('❌ Erro ao criar agendamento:', err);
-                    res.status(500).json({ error: err.message });
-                    return;
-                }
-                
-                const agendamentoId = result.insertId;
-                console.log('✅ Agendamento criado com ID:', agendamentoId);
-                
-                // SE FOR CONCLUÍDO, INSERIR NA TABELA VENDAS
-                if (status === 'concluido') {
-                    console.log('🟢 STATUS É CONCLUÍDO - Inserindo na tabela vendas...');
-                    
-                    db.query(
-                        `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento) 
-                         VALUES (?, ?, ?, ?, ?)`,
-                        [funcionario_id, cliente_id, dataFormatada, precoServico, forma_pagamento || 'dinheiro'],
-                        (errVenda, resultVenda) => {
-                            if (errVenda) {
-                                console.error('❌ ERRO AO REGISTRAR VENDA:', errVenda);
-                            } else {
-                                console.log('✅ VENDA REGISTRADA COM SUCESSO! ID:', resultVenda.insertId);
-                            }
-                        }
-                    );
-                } else {
-                    console.log('⚪ Status não é concluído (', status, ') - Nenhuma venda registrada');
-                }
-                
-                res.status(201).json({ 
-                    id: agendamentoId,
-                    message: 'Agendamento criado com sucesso' 
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        
+        const values = [
+            parseInt(cliente_id),           // cliente_id
+            parseInt(funcionario_id),       // funcionario_id
+            parseInt(servico_id),           // servico_id
+            dataHoraMySQL,                  // data_hora (formato MySQL)
+            status || 'agendado',           // status
+            observacoes || '',              // observacoes
+            valorComissao,                  // valor_comissao
+            percentualComissao,             // percentual_comissao
+            precoServico,                   // valor
+            forma_pagamento || null,        // forma_pagamento
+            bandeira_cartao || null,        // bandeira_cartao
+            parcelas || 1,                  // parcelas
+            data_pagamento || null          // data_pagamento
+        ];
+        
+        console.log('📝 Query:', query);
+        console.log('📦 Values:', values);
+        
+        db.query(query, values, (err, result) => {
+            if (err) {
+                console.error('❌ Erro detalhado ao criar agendamento:', {
+                    code: err.code,
+                    errno: err.errno,
+                    message: err.message,
+                    sqlMessage: err.sqlMessage,
+                    sql: err.sql
+                });
+                return res.status(500).json({ 
+                    error: err.message,
+                    code: err.code,
+                    sqlMessage: err.sqlMessage
                 });
             }
-        );
+            
+            const agendamentoId = result.insertId;
+            console.log('✅ Agendamento criado com ID:', agendamentoId);
+            
+            // Se for concluído, registrar venda
+            if (status === 'concluido') {
+                console.log('🟢 Registrando venda...');
+                db.query(
+                    `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento) 
+                     VALUES (?, ?, ?, ?, ?)`,
+                    [funcionario_id, cliente_id, dataFormatada, precoServico, forma_pagamento || 'dinheiro'],
+                    (errVenda) => {
+                        if (errVenda) {
+                            console.error('❌ Erro ao registrar venda:', errVenda);
+                        } else {
+                            console.log('✅ Venda registrada');
+                        }
+                    }
+                );
+            }
+            
+            res.status(201).json({ 
+                id: agendamentoId,
+                message: 'Agendamento criado com sucesso' 
+            });
+        });
     });
 });
 
