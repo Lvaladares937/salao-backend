@@ -1019,7 +1019,7 @@ app.get('/api/agendamentos/:id', (req, res) => {
     );
 });
 
-// 🔥 CRIAR NOVO AGENDAMENTO - CORRIGIDO
+// 🔥 CRIAR NOVO AGENDAMENTO - CORRIGIDO (com valor_comissao)
 app.post('/api/agendamentos', (req, res) => {
     console.log('\n=== 🚀 CRIANDO NOVO AGENDAMENTO ===');
     console.log('📦 Body recebido:', JSON.stringify(req.body, null, 2));
@@ -1041,114 +1041,89 @@ app.post('/api/agendamentos', (req, res) => {
         return res.status(400).json({ error: 'Cliente, funcionário, serviço e data/hora são obrigatórios' });
     }
     
-    console.log('📅 DATA_HORA RECEBIDA:', data_hora);
+    console.log('📅 DATA_HORA RECEBIDA DO FRONTEND:', data_hora);
     
-    // Converter data_hora para o formato MySQL DATETIME
-    const dataHoraMySQL = data_hora.replace('T', ' ').replace('Z', '');
-    console.log('📅 DATA_HORA CONVERTIDA:', dataHoraMySQL);
-    
+    const dataHoraParaSalvar = data_hora;
     const dataFormatada = data_hora.split('T')[0];
     
-    // Buscar o serviço
+    // BUSCAR O SERVIÇO COMPLETO (preço E comissão)
     db.query('SELECT preco, comissao_percentual FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
         if (errServ) {
             console.error('❌ Erro ao buscar serviço:', errServ);
             return res.status(500).json({ error: errServ.message });
         }
         
-        if (!resultServ || resultServ.length === 0) {
-            return res.status(404).json({ error: 'Serviço não encontrado' });
-        }
+        const precoServico = resultServ[0]?.preco || 0;
+        const percentualComissao = resultServ[0]?.comissao_percentual || 0;
         
-        const precoServico = resultServ[0].preco || 0;
-        const percentualComissao = resultServ[0].comissao_percentual || 0;
-        
-        // Calcular comissão apenas se concluído
+        // SÓ CALCULAR COMISSÃO SE O STATUS FOR "concluido"
         let valorComissao = 0;
         if (status === 'concluido') {
             valorComissao = (precoServico * percentualComissao) / 100;
-            console.log('💰 Comissão calculada:', valorComissao);
+            console.log('💰 Comissão calculada para conclusão:', valorComissao);
+        } else {
+            console.log('⚪ Agendamento não concluído, comissão = 0');
         }
         
-        // 🔥 QUERY CORRETA - seguindo a ordem da tabela
-        const query = `
-            INSERT INTO agendamentos (
-                cliente_id,
-                funcionario_id,
-                servico_id,
-                data_hora,
-                status,
-                observacoes,
-                valor_comissao,
-                percentual_comissao,
-                valor,
-                forma_pagamento,
-                bandeira_cartao,
-                parcelas,
-                data_pagamento
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `;
+        console.log('💰 Preço do serviço:', precoServico);
+        console.log('📊 Percentual de comissão do serviço:', percentualComissao, '%');
         
-        const values = [
-            parseInt(cliente_id),           // cliente_id
-            parseInt(funcionario_id),       // funcionario_id
-            parseInt(servico_id),           // servico_id
-            dataHoraMySQL,                  // data_hora (formato MySQL)
-            status || 'agendado',           // status
-            observacoes || '',              // observacoes
-            valorComissao,                  // valor_comissao
-            percentualComissao,             // percentual_comissao
-            precoServico,                   // valor
-            forma_pagamento || null,        // forma_pagamento
-            bandeira_cartao || null,        // bandeira_cartao
-            parcelas || 1,                  // parcelas
-            data_pagamento || null          // data_pagamento
-        ];
-        
-        console.log('📝 Query:', query);
-        console.log('📦 Values:', values);
-        
-        db.query(query, values, (err, result) => {
-            if (err) {
-                console.error('❌ Erro detalhado ao criar agendamento:', {
-                    code: err.code,
-                    errno: err.errno,
-                    message: err.message,
-                    sqlMessage: err.sqlMessage,
-                    sql: err.sql
-                });
-                return res.status(500).json({ 
-                    error: err.message,
-                    code: err.code,
-                    sqlMessage: err.sqlMessage
-                });
-            }
-            
-            const agendamentoId = result.insertId;
-            console.log('✅ Agendamento criado com ID:', agendamentoId);
-            
-            // Se for concluído, registrar venda
-            if (status === 'concluido') {
-                console.log('🟢 Registrando venda...');
-                db.query(
-                    `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento) 
-                     VALUES (?, ?, ?, ?, ?)`,
-                    [funcionario_id, cliente_id, dataFormatada, precoServico, forma_pagamento || 'dinheiro'],
-                    (errVenda) => {
-                        if (errVenda) {
-                            console.error('❌ Erro ao registrar venda:', errVenda);
-                        } else {
-                            console.log('✅ Venda registrada');
+        // 🔥 CORREÇÃO: 13 colunas e 13 valores (incluindo valor_comissao)
+        db.query(
+            `INSERT INTO agendamentos 
+            (cliente_id, funcionario_id, servico_id, data_hora, status, observacoes, 
+             valor_comissao, percentual_comissao, valor, forma_pagamento, bandeira_cartao, parcelas, data_pagamento) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                cliente_id, 
+                funcionario_id, 
+                servico_id, 
+                dataHoraParaSalvar, 
+                status || 'agendado', 
+                observacoes || '', 
+                valorComissao,        // 7º - valor_comissao
+                percentualComissao,   // 8º - percentual_comissao
+                precoServico,         // 9º - valor
+                forma_pagamento || null,   // 10º
+                bandeira_cartao || null,   // 11º
+                parcelas || 1,        // 12º
+                data_pagamento || null     // 13º
+            ],
+            (err, result) => {
+                if (err) {
+                    console.error('❌ Erro ao criar agendamento:', err);
+                    return res.status(500).json({ error: err.message });
+                }
+                
+                const agendamentoId = result.insertId;
+                console.log('✅ Agendamento criado com ID:', agendamentoId);
+                
+                // SE FOR CONCLUÍDO, INSERIR NA TABELA VENDAS
+                if (status === 'concluido') {
+                    console.log('🟢 STATUS É CONCLUÍDO - Inserindo na tabela vendas...');
+                    
+                    db.query(
+                        `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento) 
+                         VALUES (?, ?, ?, ?, ?)`,
+                        [funcionario_id, cliente_id, dataFormatada, precoServico, forma_pagamento || 'dinheiro'],
+                        (errVenda, resultVenda) => {
+                            if (errVenda) {
+                                console.error('❌ ERRO AO REGISTRAR VENDA:', errVenda);
+                            } else {
+                                console.log('✅ VENDA REGISTRADA COM SUCESSO! ID:', resultVenda.insertId);
+                            }
                         }
-                    }
-                );
+                    );
+                } else {
+                    console.log('⚪ Status não é concluído (', status, ') - Nenhuma venda registrada');
+                }
+                
+                res.status(201).json({ 
+                    id: agendamentoId,
+                    message: 'Agendamento criado com sucesso' 
+                });
             }
-            
-            res.status(201).json({ 
-                id: agendamentoId,
-                message: 'Agendamento criado com sucesso' 
-            });
-        });
+        );
     });
 });
 
@@ -2191,92 +2166,134 @@ app.get('/api/bot/profissionais', (req, res) => {
     });
 });
 
-// AGENDA DO PROFISSIONAL
+// AGENDA DO PROFISSIONAL - VERSÃO CORRIGIDA E SIMPLIFICADA
 app.get('/api/bot/profissional/:id/agenda', (req, res) => {
     const { id } = req.params;
     const { data } = req.query;
     
     console.log(`📅 Agenda do profissional ${id}${data ? ` para ${data}` : ''}`);
     
+    // Verificar se o profissional existe
     db.query('SELECT id, nome FROM funcionarios WHERE id = ? AND ativo = 1', [id], (err, prof) => {
         if (err || prof.length === 0) {
             return res.status(404).json({ error: 'Profissional não encontrado' });
         }
         
-        let dataInicio, dataFim;
-        const hoje = new Date().toISOString().split('T')[0];
+        // Função para buscar horários ocupados de uma data
+        const buscarOcupados = (dataStr, callback) => {
+            db.query(
+                `SELECT TIME_FORMAT(data_hora, '%H:%i') as horario
+                 FROM agendamentos 
+                 WHERE funcionario_id = ? 
+                 AND DATE(data_hora) = ?
+                 AND status IN ('confirmado', 'pendente', 'agendado')`,
+                [id, dataStr],
+                (err, ocupados) => {
+                    if (err) {
+                        callback(err, null);
+                        return;
+                    }
+                    callback(null, ocupados.map(o => o.horario));
+                }
+            );
+        };
         
+        // Função para gerar todos os horários possíveis
+        const gerarTodosHorarios = () => {
+            const horarios = [];
+            for (let hora = 9; hora <= 19; hora++) {
+                for (let minuto of [0, 30]) {
+                    if (hora === 19 && minuto === 30) continue;
+                    const horaStr = hora.toString().padStart(2, '0');
+                    const minutoStr = minuto.toString().padStart(2, '0');
+                    horarios.push(`${horaStr}:${minutoStr}`);
+                }
+            }
+            return horarios;
+        };
+        
+        const todosHorarios = gerarTodosHorarios();
+        
+        // Se veio uma data específica
         if (data) {
-            dataInicio = data;
-            dataFim = data;
-        } else {
-            dataInicio = hoje;
-            const fim = new Date();
-            fim.setDate(fim.getDate() + 30);
-            dataFim = fim.toISOString().split('T')[0];
-        }
-        
-        db.query(
-            `SELECT DATE(data_hora) as data, HOUR(data_hora) as hora 
-             FROM agendamentos 
-             WHERE funcionario_id = ? 
-             AND DATE(data_hora) BETWEEN ? AND ?
-             AND status NOT IN ('cancelado', 'cancelada')`,
-            [id, dataInicio, dataFim],
-            (err, ocupados) => {
+            buscarOcupados(data, (err, horariosOcupados) => {
                 if (err) {
+                    console.error('❌ Erro:', err);
                     return res.status(500).json({ error: err.message });
                 }
                 
-                const ocupadosMap = {};
-                ocupados.forEach(o => {
-                    if (!ocupadosMap[o.data]) ocupadosMap[o.data] = [];
-                    ocupadosMap[o.data].push(o.hora);
+                const horariosDisponiveis = todosHorarios.filter(h => !horariosOcupados.includes(h));
+                
+                console.log(`📊 Data ${data}: ${horariosDisponiveis.length} disponíveis, ${horariosOcupados.length} ocupados`);
+                
+                const dataObj = new Date(data);
+                const dataFormatada = `${dataObj.getDate().toString().padStart(2, '0')}/${(dataObj.getMonth()+1).toString().padStart(2, '0')}/${dataObj.getFullYear()}`;
+                
+                res.json({
+                    profissional_id: id,
+                    profissional_nome: prof[0].nome,
+                    dias_disponiveis: [{
+                        data: data,
+                        data_formatada: dataFormatada,
+                        horarios_disponiveis: horariosDisponiveis
+                    }]
                 });
+            });
+            return;
+        }
+        
+        // Buscar para os próximos 14 dias
+        const diasDisponiveis = [];
+        let consultasPendentes = 0;
+        let finalizado = false;
+        
+        for (let i = 0; i <= 14; i++) {
+            const dataAtual = new Date();
+            dataAtual.setDate(dataAtual.getDate() + i);
+            const dataStr = dataAtual.toISOString().split('T')[0];
+            const diaSemana = dataAtual.getDay();
+            
+            // Segunda a Sábado
+            if (diaSemana >= 1 && diaSemana <= 6) {
+                consultasPendentes++;
                 
-                const diasDisponiveis = [];
-                const dataAtual = new Date(dataInicio);
-                let dias = 0;
-                const maxDias = data ? 1 : 14;
-                
-                while (dias < maxDias) {
-                    const dataStr = dataAtual.toISOString().split('T')[0];
-                    const diaSemana = dataAtual.getDay();
+                buscarOcupados(dataStr, (err, horariosOcupados) => {
+                    consultasPendentes--;
                     
-                    if (diaSemana >= 1 && diaSemana <= 5) {
-                        const horariosDisponiveis = [];
-                        const ocupadosHoje = ocupadosMap[dataStr] || [];
-                        
-                        for (let hora = 9; hora <= 18; hora++) {
-                            if (!ocupadosHoje.includes(hora)) {
-                                horariosDisponiveis.push(`${hora.toString().padStart(2, '0')}:00`);
-                            }
-                        }
+                    if (!err && horariosOcupados) {
+                        const horariosDisponiveis = todosHorarios.filter(h => !horariosOcupados.includes(h));
                         
                         if (horariosDisponiveis.length > 0) {
-                            const dia = dataAtual.getDate();
-                            const mes = dataAtual.getMonth() + 1;
-                            const ano = dataAtual.getFullYear();
-                            
                             diasDisponiveis.push({
                                 data: dataStr,
-                                data_formatada: `${dia.toString().padStart(2, '0')}/${mes.toString().padStart(2, '0')}/${ano}`,
+                                data_formatada: `${dataAtual.getDate().toString().padStart(2, '0')}/${(dataAtual.getMonth()+1).toString().padStart(2, '0')}/${dataAtual.getFullYear()}`,
                                 horarios_disponiveis: horariosDisponiveis
                             });
                         }
                     }
                     
-                    dataAtual.setDate(dataAtual.getDate() + 1);
-                    dias++;
-                }
-                
-                res.json({
-                    profissional_id: id,
-                    profissional_nome: prof[0].nome,
-                    dias_disponiveis: diasDisponiveis
+                    // Quando todas as consultas terminarem, enviar resposta
+                    if (consultasPendentes === 0 && !finalizado) {
+                        finalizado = true;
+                        res.json({
+                            profissional_id: id,
+                            profissional_nome: prof[0].nome,
+                            dias_disponiveis: diasDisponiveis
+                        });
+                    }
                 });
             }
-        );
+        }
+        
+        // Se não houver consultas pendentes (nenhum dia útil), enviar resposta vazia
+        if (consultasPendentes === 0 && !finalizado) {
+            finalizado = true;
+            res.json({
+                profissional_id: id,
+                profissional_nome: prof[0].nome,
+                dias_disponiveis: []
+            });
+        }
     });
 });
 
@@ -2432,22 +2449,24 @@ app.get('/api/bot/clientes/:id/agendamentos', (req, res) => {
     );
 });
 
-// CRIAR AGENDAMENTO
+// CRIAR AGENDAMENTO - CORRIGIDO
 app.post('/api/bot/agendamentos', (req, res) => {
     const { nome_cliente, telefone_cliente, cliente_id, servico_id, data, horario, profissional_id } = req.body;
     
     console.log('📝 Criando agendamento:', { nome_cliente, data, horario, profissional_id });
     
-    const hora = parseInt(horario.split(':')[0]);
-    const dataHora = `${data} ${hora.toString().padStart(2, '0')}:00:00`;
+    // 🔥 CORREÇÃO: Usar o horário completo com minutos
+    const dataHora = `${data} ${horario}:00`;
+    
+    console.log(`📅 Data/Hora completa: ${dataHora}`);
     
     db.query(
         `SELECT id FROM agendamentos 
          WHERE funcionario_id = ? 
          AND DATE(data_hora) = ? 
-         AND HOUR(data_hora) = ?
+         AND TIME(data_hora) = ?
          AND status NOT IN ('cancelado', 'cancelada')`,
-        [profissional_id, data, hora],
+        [profissional_id, data, `${horario}:00`],
         (err, ocupados) => {
             if (err) {
                 return res.status(500).json({ error: err.message });
@@ -2497,7 +2516,7 @@ app.post('/api/bot/agendamentos', (req, res) => {
                                 return res.status(500).json({ error: err.message });
                             }
                             
-                            console.log(`✅ Agendamento criado! ID: ${result.insertId}`);
+                            console.log(`✅ Agendamento criado! ID: ${result.insertId} - ${dataHora}`);
                             res.json({ id: result.insertId, success: true });
                         }
                     );
@@ -2514,16 +2533,23 @@ app.post('/api/bot/agendamentos', (req, res) => {
 app.put('/api/bot/agendamentos/:id/cancelar', (req, res) => {
     const { id } = req.params;
     
-    db.query(
-        'UPDATE agendamentos SET status = "cancelado" WHERE id = ?',
-        [id],
-        (err, result) => {
-            if (err) {
-                return res.status(500).json({ error: err.message });
-            }
-            res.json({ success: true });
+    console.log(`📝 Cancelando agendamento ID: ${id}`);
+    
+    const query = 'UPDATE agendamentos SET status = "cancelado" WHERE id = ?';
+    
+    db.query(query, [id], (err, result) => {
+        if (err) {
+            console.error('❌ Erro ao cancelar:', err);
+            return res.status(500).json({ error: err.message });
         }
-    );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Agendamento não encontrado' });
+        }
+        
+        console.log(`✅ Agendamento ${id} cancelado com sucesso!`);
+        res.json({ success: true, message: 'Agendamento cancelado' });
+    });
 });
 
 // INFO DO SALÃO
