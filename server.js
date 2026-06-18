@@ -849,7 +849,7 @@ app.delete('/api/funcionarios/:id/adiantamentos/:adiantamentoId', (req, res) => 
 });
 
 // ============================================
-// ROTAS DE AGENDAMENTOS - SEM CONVERSÃO DE TIMEZONE
+// ROTAS DE AGENDAMENTOS - COM SUPORTE A COMISSÃO PERSONALIZADA
 // ============================================
 
 // Listar todos os agendamentos
@@ -1019,7 +1019,7 @@ app.get('/api/agendamentos/:id', (req, res) => {
     );
 });
 
-// 🔥 CRIAR NOVO AGENDAMENTO - CORRIGIDO (com valor_comissao)
+// 🔥 CRIAR NOVO AGENDAMENTO - COM SUPORTE A COMISSÃO PERSONALIZADA
 app.post('/api/agendamentos', (req, res) => {
     console.log('\n=== 🚀 CRIANDO NOVO AGENDAMENTO ===');
     console.log('📦 Body recebido:', JSON.stringify(req.body, null, 2));
@@ -1035,9 +1035,10 @@ app.post('/api/agendamentos', (req, res) => {
         bandeira_cartao,
         parcelas,
         data_pagamento,
-        valor_personalizado,  // 🔥 NOVO - valor personalizado pelo usuário
-        valor_original,       // 🔥 NOVO - valor original do serviço
-        valor                 // 🔥 NOVO - valor final (pode ser personalizado ou original)
+        valor_personalizado,
+        valor_original,
+        valor,
+        comissao_personalizada  // 🔥 NOVO - comissão personalizada
     } = req.body;
     
     if (!cliente_id || !funcionario_id || !servico_id || !data_hora) {
@@ -1045,6 +1046,7 @@ app.post('/api/agendamentos', (req, res) => {
     }
     
     console.log('📅 DATA_HORA RECEBIDA DO FRONTEND:', data_hora);
+    console.log('💰 COMISSÃO PERSONALIZADA RECEBIDA:', comissao_personalizada);
     
     const dataHoraParaSalvar = data_hora;
     const dataFormatada = data_hora.split('T')[0];
@@ -1057,9 +1059,18 @@ app.post('/api/agendamentos', (req, res) => {
         }
         
         const precoOriginalServico = resultServ[0]?.preco || 0;
-        const percentualComissao = resultServ[0]?.comissao_percentual || 0;
+        const percentualComissaoPadrao = resultServ[0]?.comissao_percentual || 0;
         
-        // 🔥 DEFINE O VALOR FINAL (usa o valor personalizado se existir, senão usa o original)
+        // 🔥 DEFINE O PERCENTUAL DE COMISSÃO (usa o personalizado se existir)
+        let percentualComissaoFinal = percentualComissaoPadrao;
+        if (comissao_personalizada !== null && comissao_personalizada !== undefined && comissao_personalizada >= 0) {
+            percentualComissaoFinal = comissao_personalizada;
+            console.log('💰 Usando COMISSÃO PERSONALIZADA:', percentualComissaoFinal, '% (padrão:', percentualComissaoPadrao, '%)');
+        } else {
+            console.log('💰 Usando COMISSÃO PADRÃO do serviço:', percentualComissaoFinal, '%');
+        }
+        
+        // 🔥 DEFINE O VALOR FINAL (usa o valor personalizado se existir)
         let valorFinal = precoOriginalServico;
         if (valor_personalizado !== null && valor_personalizado !== undefined && valor_personalizado > 0) {
             valorFinal = valor_personalizado;
@@ -1072,10 +1083,10 @@ app.post('/api/agendamentos', (req, res) => {
             console.log('💰 Usando VALOR ORIGINAL do serviço:', valorFinal);
         }
         
-        // SÓ CALCULAR COMISSÃO SE O STATUS FOR "concluido"
+        // CALCULAR COMISSÃO EM REAIS
         let valorComissao = 0;
         if (status === 'concluido') {
-            valorComissao = (valorFinal * percentualComissao) / 100;
+            valorComissao = (valorFinal * percentualComissaoFinal) / 100;
             console.log('💰 Comissão calculada para conclusão:', valorComissao);
         } else {
             console.log('⚪ Agendamento não concluído, comissão = 0');
@@ -1083,16 +1094,16 @@ app.post('/api/agendamentos', (req, res) => {
         
         console.log('💰 Preço FINAL do serviço:', valorFinal);
         console.log('💰 Preço ORIGINAL do serviço:', precoOriginalServico);
-        console.log('📊 Percentual de comissão do serviço:', percentualComissao, '%');
+        console.log('📊 Percentual de comissão FINAL:', percentualComissaoFinal, '%');
+        console.log('📊 Percentual de comissão PADRÃO:', percentualComissaoPadrao, '%');
         
-        // 🔥 INSERIR COM SUPORTE A VALOR PERSONALIZADO
-        // Verificar se as colunas existem no banco
+        // 🔥 INSERIR COM SUPORTE A VALOR PERSONALIZADO E COMISSÃO PERSONALIZADA
         db.query(
             `INSERT INTO agendamentos 
             (cliente_id, funcionario_id, servico_id, data_hora, status, observacoes, 
              valor_comissao, percentual_comissao, valor, forma_pagamento, bandeira_cartao, parcelas, data_pagamento,
-             valor_personalizado, valor_original_personalizado) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             valor_personalizado, valor_original_personalizado, comissao_personalizada) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 cliente_id, 
                 funcionario_id, 
@@ -1101,14 +1112,15 @@ app.post('/api/agendamentos', (req, res) => {
                 status || 'agendado', 
                 observacoes || '', 
                 valorComissao,                              // valor_comissao
-                percentualComissao,                         // percentual_comissao
+                percentualComissaoFinal,                    // percentual_comissao (USAR O FINAL)
                 valorFinal,                                 // valor (final)
                 forma_pagamento || null,                    // forma_pagamento
                 bandeira_cartao || null,                    // bandeira_cartao
                 parcelas || 1,                              // parcelas
                 data_pagamento || null,                     // data_pagamento
                 (valor_personalizado !== null && valor_personalizado !== precoOriginalServico) ? valorFinal : null,  // valor_personalizado
-                precoOriginalServico                        // valor_original_personalizado
+                precoOriginalServico,                       // valor_original_personalizado
+                (comissao_personalizada !== null && comissao_personalizada !== percentualComissaoPadrao) ? comissao_personalizada : null  // 🔥 comissao_personalizada
             ],
             (err, result) => {
                 if (err) {
@@ -1129,7 +1141,7 @@ app.post('/api/agendamentos', (req, res) => {
                                 status || 'agendado', 
                                 observacoes || '', 
                                 valorComissao,
-                                percentualComissao,
+                                percentualComissaoFinal,
                                 valorFinal,
                                 forma_pagamento || null,
                                 bandeira_cartao || null,
@@ -1177,11 +1189,12 @@ app.post('/api/agendamentos', (req, res) => {
                     console.log('🟢 STATUS É CONCLUÍDO - Inserindo na tabela vendas...');
                     
                     db.query(
-                        `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento, valor_personalizado, valor_original) 
-                         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                        `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento, valor_personalizado, valor_original, comissao_personalizada) 
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                         [funcionario_id, cliente_id, dataFormatada, valorFinal, forma_pagamento || 'dinheiro', 
                          (valor_personalizado !== null && valor_personalizado !== precoOriginalServico) ? valorFinal : null, 
-                         precoOriginalServico],
+                         precoOriginalServico,
+                         (comissao_personalizada !== null && comissao_personalizada !== percentualComissaoPadrao) ? comissao_personalizada : null],
                         (errVenda, resultVenda) => {
                             if (errVenda) {
                                 console.error('❌ ERRO AO REGISTRAR VENDA:', errVenda);
@@ -1203,7 +1216,7 @@ app.post('/api/agendamentos', (req, res) => {
     });
 });
 
-// 🔥 ATUALIZAR AGENDAMENTO - CORRIGIDO (recalcula comissão quando concluído)
+// 🔥 ATUALIZAR AGENDAMENTO - COM SUPORTE A COMISSÃO PERSONALIZADA
 app.put('/api/agendamentos/:id', (req, res) => {
     const { 
         cliente_id, 
@@ -1218,11 +1231,13 @@ app.put('/api/agendamentos/:id', (req, res) => {
         data_pagamento,
         valor_personalizado,
         valor_original,
-        valor
+        valor,
+        comissao_personalizada  // 🔥 NOVO - comissão personalizada
     } = req.body;
     
     console.log('📥 Atualizando agendamento ID:', req.params.id);
     console.log('📦 Valor personalizado recebido:', valor_personalizado);
+    console.log('📦 Comissão personalizada recebida:', comissao_personalizada);
     
     // Primeiro, buscar o agendamento atual e o serviço
     db.query('SELECT * FROM agendamentos WHERE id = ?', [req.params.id], (errSelect, results) => {
@@ -1238,7 +1253,7 @@ app.put('/api/agendamentos/:id', (req, res) => {
         const agendamentoAtual = results[0];
         const statusAnterior = agendamentoAtual.status;
         
-        // Buscar serviço para pegar comissão
+        // Buscar serviço para pegar comissão padrão
         db.query('SELECT preco, comissao_percentual FROM servicos WHERE id = ?', [servico_id], (errServ, resultServ) => {
             if (errServ) {
                 console.error('Erro ao buscar serviço:', errServ);
@@ -1246,7 +1261,16 @@ app.put('/api/agendamentos/:id', (req, res) => {
             }
             
             const precoOriginalServico = resultServ[0]?.preco || 0;
-            const percentualComissao = resultServ[0]?.comissao_percentual || 0;
+            const percentualComissaoPadrao = resultServ[0]?.comissao_percentual || 0;
+            
+            // 🔥 DEFINE O PERCENTUAL DE COMISSÃO (usa o personalizado se existir)
+            let percentualComissaoFinal = percentualComissaoPadrao;
+            if (comissao_personalizada !== null && comissao_personalizada !== undefined && comissao_personalizada >= 0) {
+                percentualComissaoFinal = comissao_personalizada;
+                console.log('💰 Usando COMISSÃO PERSONALIZADA:', percentualComissaoFinal, '% (padrão:', percentualComissaoPadrao, '%)');
+            } else {
+                console.log('💰 Usando COMISSÃO PADRÃO do serviço:', percentualComissaoFinal, '%');
+            }
             
             // 🔥 DEFINE O VALOR FINAL
             let valorFinal = precoOriginalServico;
@@ -1256,10 +1280,10 @@ app.put('/api/agendamentos/:id', (req, res) => {
                 valorFinal = valor;
             }
             
-            // Calcular comissão
+            // Calcular comissão em reais
             let valorComissao = 0;
             if (status === 'concluido') {
-                valorComissao = (valorFinal * percentualComissao) / 100;
+                valorComissao = (valorFinal * percentualComissaoFinal) / 100;
             }
             
             const dataFormatada = data_hora ? data_hora.split('T')[0] : null;
@@ -1281,14 +1305,28 @@ app.put('/api/agendamentos/:id', (req, res) => {
                 parcelas = ?,
                 data_pagamento = ?,
                 valor_personalizado = ?,
-                valor_original_personalizado = ?
+                valor_original_personalizado = ?,
+                comissao_personalizada = ?
                 WHERE id = ?`,
-                [cliente_id, funcionario_id, servico_id, data_hora, status, observacoes, 
-                 valorComissao, percentualComissao, valorFinal, 
-                 forma_pagamento, bandeira_cartao, parcelas || 1, data_pagamento,
-                 (valor_personalizado !== null && valor_personalizado !== precoOriginalServico) ? valorFinal : null,
-                 precoOriginalServico,
-                 req.params.id],
+                [
+                    cliente_id, 
+                    funcionario_id, 
+                    servico_id, 
+                    data_hora, 
+                    status, 
+                    observacoes, 
+                    valorComissao, 
+                    percentualComissaoFinal,  // 🔥 USAR O PERCENTUAL FINAL
+                    valorFinal, 
+                    forma_pagamento, 
+                    bandeira_cartao, 
+                    parcelas || 1, 
+                    data_pagamento,
+                    (valor_personalizado !== null && valor_personalizado !== precoOriginalServico) ? valorFinal : null,
+                    precoOriginalServico,
+                    (comissao_personalizada !== null && comissao_personalizada !== percentualComissaoPadrao) ? comissao_personalizada : null,  // 🔥 SALVAR COMISSÃO PERSONALIZADA
+                    req.params.id
+                ],
                 (err, result) => {
                     if (err) {
                         console.error('❌ Erro ao atualizar agendamento:', err);
@@ -1296,15 +1334,17 @@ app.put('/api/agendamentos/:id', (req, res) => {
                     }
                     
                     console.log('✅ Agendamento atualizado com sucesso');
+                    console.log('💰 Comissão personalizada salva:', (comissao_personalizada !== null && comissao_personalizada !== percentualComissaoPadrao) ? comissao_personalizada : 'null (usando padrão)');
                     
                     // Lógica de vendas
                     if (status === 'concluido' && statusAnterior !== 'concluido') {
                         db.query(
-                            `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento, valor_personalizado, valor_original) 
-                             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                            `INSERT INTO vendas (funcionario_id, cliente_id, data_venda, valor_total, forma_pagamento, valor_personalizado, valor_original, comissao_personalizada) 
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                             [funcionario_id, cliente_id, dataFormatada, valorFinal, forma_pagamento || 'dinheiro', 
                              (valor_personalizado !== null && valor_personalizado !== precoOriginalServico) ? valorFinal : null, 
-                             precoOriginalServico],
+                             precoOriginalServico,
+                             (comissao_personalizada !== null && comissao_personalizada !== percentualComissaoPadrao) ? comissao_personalizada : null],
                             (errVenda) => {
                                 if (errVenda) console.error('❌ Erro ao registrar venda:', errVenda);
                                 else console.log('✅ Venda registrada');
@@ -1321,10 +1361,17 @@ app.put('/api/agendamentos/:id', (req, res) => {
                         );
                     } else if (status === 'concluido' && statusAnterior === 'concluido') {
                         db.query(
-                            'UPDATE vendas SET valor_total = ?, forma_pagamento = ?, valor_personalizado = ?, valor_original = ? WHERE funcionario_id = ? AND data_venda = ?',
+                            `UPDATE vendas SET 
+                             valor_total = ?, 
+                             forma_pagamento = ?, 
+                             valor_personalizado = ?, 
+                             valor_original = ?,
+                             comissao_personalizada = ?
+                             WHERE funcionario_id = ? AND data_venda = ?`,
                             [valorFinal, forma_pagamento, 
                              (valor_personalizado !== null && valor_personalizado !== precoOriginalServico) ? valorFinal : null,
                              precoOriginalServico,
+                             (comissao_personalizada !== null && comissao_personalizada !== percentualComissaoPadrao) ? comissao_personalizada : null,
                              funcionario_id, dataFormatada],
                             (errVenda) => {
                                 if (errVenda) console.error('❌ Erro ao atualizar venda:', errVenda);
@@ -1366,22 +1413,18 @@ app.delete('/api/agendamentos/:id', (req, res) => {
             }
             
             if (agendamento.status === 'concluido') {
-                // 🔥 CORREÇÃO: Verificar o tipo de data_hora
                 let dataFormatada;
                 
                 if (agendamento.data_hora instanceof Date) {
-                    // Se for objeto Date, formatar para YYYY-MM-DD
                     const ano = agendamento.data_hora.getFullYear();
                     const mes = String(agendamento.data_hora.getMonth() + 1).padStart(2, '0');
                     const dia = String(agendamento.data_hora.getDate()).padStart(2, '0');
                     dataFormatada = `${ano}-${mes}-${dia}`;
                     console.log('📅 Data do objeto Date:', dataFormatada);
                 } else if (typeof agendamento.data_hora === 'string') {
-                    // Se for string, extrair a data
                     dataFormatada = agendamento.data_hora.split('T')[0];
                     console.log('📅 Data da string:', dataFormatada);
                 } else {
-                    // Fallback
                     dataFormatada = new Date(agendamento.data_hora).toISOString().split('T')[0];
                     console.log('📅 Data convertida:', dataFormatada);
                 }
